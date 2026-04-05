@@ -1,0 +1,195 @@
+# =============================================================================
+# MnnLlmChat Android APK 构建工作流
+# =============================================================================
+# 为什么需要这个工作流？
+#   现有的 android.yml 只编译 MNN 原生库（验证 C++ 编译），但不会构建完整的
+#   Android APK。这个工作流补全了 CI 链路：从 NDK 编译原生库 → Gradle 构建 APK，
+#   确保每次提交都能产出一个可安装的 Debug APK。
+#
+# 构建流程分两步：
+#   1. CMake + NDK 编译 MNN 原生 .so 库（arm64-v8a）
+#   2. Gradle 构建 MnnLlmChat standardDebug APK（会自动链接步骤 1 的 .so）
+# =============================================================================
+
+name: android-apk
+
+# ---------------------------------------------------------------------------
+# 触发条件：
+#   - push: 所有分支都触发（确保任何分支的改动都能验证 APK 构建）
+#   - pull_request: 只在 PR 到 master 时触发（避免重复运行）
+#   - workflow_dispatch: 允许手动触发（方便临时验证）
+# ---------------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+# ---------------------------------------------------------------------------
+# 并发控制：
+#   同一个 git ref（分支/PR）只保留最新的运行，取消之前还在跑的旧任务。
+#   为什么？因为同一分支连续 push 多次时，只有最新代码的构建结果有意义。
+# ---------------------------------------------------------------------------
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+# 最小权限原则：只需要读取仓库代码
+permissions:
+  contents: read
+
+jobs:
+  build_apk:
+    runs-on: ubuntu-latest
+
+    # -----------------------------------------------------------------------
+    # 环境变量集中管理：
+    #   ANDROID_HOME: Android SDK 安装路径，使用 runner 的 tool_cache 目录
+    #   ANDROID_NDK:  NDK 路径，build_64.sh 脚本会通过这个变量找到 NDK 工具链
+    #   NDK_VERSION:  固定 NDK 版本，必须与 app/build.gradle 中的 ndkVersion 一致
+    # -----------------------------------------------------------------------
+    env:
+      ANDROID_HOME: ${{ runner.tool_cache }}/android-sdk
+      NDK_VERSION: "27.2.12479018"
+
+    steps:
+      # =====================================================================
+      # 步骤 1: 检出代码
+      # =====================================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # =====================================================================
+      # 步骤 2: 安装 JDK 17
+      # 为什么是 JDK 17？因为 Android Gradle Plugin 8.x 要求最低 JDK 17。
+      # temurin 是 Eclipse 维护的免费 OpenJDK 发行版，CI 中最常用。
+      # =====================================================================
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # =====================================================================
+      # 步骤 3: 安装 Android SDK 和 NDK
+      # 为什么不用 runner 自带的 SDK？
+      #   因为 GitHub Actions runner 自带的 SDK 版本不一定包含我们需要的
+      #   精确 NDK 版本（27.2.12479018），手动安装可以完全控制依赖版本。
+      #
+      # 安装顺序：
+      #   1. 下载 Android command-line tools（包含 sdkmanager）
+      #   2. 用 sdkmanager 安装 NDK、CMake、Platform、Build-tools
+      #   3. 设置 ANDROID_NDK 环境变量供后续步骤使用
+      # =====================================================================
+      - name: Setup Android SDK & NDK
+        run: |
+          # 创建 SDK 目录结构（cmdline-tools 必须放在 latest 子目录下）
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+
+          # 下载 Android command-line tools（Linux 版本）
+          curl -fsSL -o cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+
+          # 用 sdkmanager 安装所需组件：
+          #   - ndk: C++ 原生编译工具链
+          #   - cmake: CMake 构建系统（NDK 编译需要）
+          #   - platforms: Android API level（编译目标）
+          #   - build-tools: APK 打包工具（aapt2, dx 等）
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;3.22.1" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          # 将 NDK 路径写入 GITHUB_ENV，后续所有步骤都能通过 $ANDROID_NDK 访问
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      # =====================================================================
+      # 步骤 4: 缓存 Gradle 依赖
+      # 为什么要缓存？Gradle 首次运行会下载大量依赖（几百 MB），缓存后
+      # 后续运行可以跳过下载，显著加速构建。
+      # Key 基于 gradle 配置文件的 hash：配置变了才重新下载。
+      # =====================================================================
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # =====================================================================
+      # 步骤 5: 编译 MNN 原生库 (arm64-v8a)
+      # 这一步完全复刻 apps/Android/MnnLlmChat/build.sh 的 CMake 参数。
+      #
+      # 关键参数说明：
+      #   MNN_LOW_MEMORY + MNN_CPU_WEIGHT_DEQUANT_GEMM: 低内存模式 + 权重反量化
+      #   MNN_BUILD_LLM: 构建 LLM 推理引擎
+      #   MNN_SUPPORT_TRANSFORMER_FUSE: Transformer 算子融合加速
+      #   MNN_ARM82: 启用 ARMv8.2 FP16 半精度加速
+      #   MNN_OPENCL: OpenCL GPU 后端
+      #   LLM_SUPPORT_VISION + MNN_BUILD_OPENCV + MNN_IMGCODECS: 视觉能力
+      #   LLM_SUPPORT_AUDIO + MNN_BUILD_AUDIO: 音频能力
+      #   MNN_BUILD_DIFFUSION: Stable Diffusion 支持
+      #   MNN_SEP_BUILD=OFF: 单库模式（所有功能编译到一个 .so）
+      #   BUILD_PLUGIN=ON: 插件系统
+      #   max-page-size=16384: Android 16KB 页面大小兼容
+      #   CMAKE_INSTALL_PREFIX=.: make install 输出到当前目录（build_64/lib/）
+      # =====================================================================
+      - name: Build MNN native libs (arm64-v8a)
+        run: |
+          cd project/android
+          mkdir -p build_64
+          cd build_64
+          ../build_64.sh \
+            -DMNN_LOW_MEMORY=true \
+            -DMNN_CPU_WEIGHT_DEQUANT_GEMM=true \
+            -DMNN_BUILD_LLM=true \
+            -DMNN_SUPPORT_TRANSFORMER_FUSE=true \
+            -DMNN_ARM82=true \
+            -DMNN_USE_LOGCAT=true \
+            -DMNN_OPENCL=true \
+            -DLLM_SUPPORT_VISION=true \
+            -DMNN_BUILD_OPENCV=true \
+            -DMNN_IMGCODECS=true \
+            -DLLM_SUPPORT_AUDIO=true \
+            -DMNN_BUILD_AUDIO=true \
+            -DMNN_BUILD_DIFFUSION=ON \
+            -DMNN_SEP_BUILD=OFF \
+            -DBUILD_PLUGIN=ON \
+            -DMNN_QNN=OFF \
+            "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384" \
+            -DCMAKE_INSTALL_PREFIX=.
+          make install
+
+      # =====================================================================
+      # 步骤 6: 构建 APK (standardDebug)
+      # 为什么是 standardDebug？
+      #   - standard flavor: 不含 Firebase/Google Play 特定功能，CI 最简洁
+      #   - Debug: 不需要签名密钥，适合 CI 验证构建
+      # --no-daemon: CI 环境中不需要 Gradle 守护进程（反而浪费资源）
+      # =====================================================================
+      - name: Build APK (standardDebug)
+        run: |
+          cd apps/Android/MnnLlmChat
+          chmod +x gradlew
+          ./gradlew assembleStandardDebug --no-daemon
+
+      # =====================================================================
+      # 步骤 7: 上传 APK 产物
+      # 构建成功后，将 APK 文件上传为 GitHub Actions Artifact，
+      # 开发者可以从 Actions 页面直接下载安装测试。
+      # =====================================================================
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MnnLlmChat-standardDebug
+          path: apps/Android/MnnLlmChat/app/build/outputs/apk/standard/debug/*.apk

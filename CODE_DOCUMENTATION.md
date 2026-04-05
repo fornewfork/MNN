@@ -460,7 +460,40 @@ MNN 使用自定义测试框架 `MNNTestSuite`（`test/MNNTestSuite.h`），类�
 
 ---
 
-## 9. Skills（AI 辅助开发指引）
+## 9. CI/CD 工作流
+
+### 9.1 GitHub Actions 工作流一览
+
+| 工作流文件 | 名称 | 用途 |
+|-----------|------|------|
+| `android.yml` | android | 编译 MNN 原生库（arm64 + arm32），验证 C++ 编译 |
+| `android-apk.yml` | android-apk | 完整构建 MnnLlmChat standardDebug APK（NDK 编译 + Gradle 构建） |
+| `linux.yml` | linux | Linux 平台编译测试 |
+| `macos.yml` | macos | macOS 平台编译测试 |
+| `windows.yml` | windows | Windows 平台编译测试 |
+| `ios.yml` | ios | iOS 平台编译测试 |
+| `code-format.yml` | code-format | 代码格式检查 |
+
+### 9.2 android-apk 工作流详解
+
+**文件**: `.github/workflows/android-apk.yml`
+
+**触发条件**: 所有分支 push、PR 到 master、手动触发
+
+**构建流程**:
+1. 安装 JDK 17 + Android SDK + NDK 27.2.12479018
+2. CMake 编译 MNN 原生库（arm64-v8a），参数复刻自 `apps/Android/MnnLlmChat/build.sh`
+3. Gradle 构建 `assembleStandardDebug`
+4. 上传 APK 为 GitHub Actions Artifact
+
+**关键依赖**:
+- `project/android/build_64.sh`: NDK 编译脚本，依赖 `$ANDROID_NDK` 环境变量
+- `apps/Android/MnnLlmChat/`: Gradle 项目，依赖 `project/android/build_64/lib/` 下的 `.so` 文件
+- NDK 版本必须精确匹配 `27.2.12479018`（`app/build.gradle` 硬编码）
+
+---
+
+## 10. Skills（AI 辅助开发指引）
 
 `skills/` 目录包含面向 AI 代理的结构化开发指引：
 
@@ -474,7 +507,7 @@ MNN 使用自定义测试框架 `MNNTestSuite`（`test/MNNTestSuite.h`），类�
 
 ---
 
-## 10. 限制区域
+## 11. 限制区域
 
 > ⚠️ 以下目录包含内部私有代码，**禁止读取、修改或引用**：
 > - `schema/private/`
@@ -482,9 +515,9 @@ MNN 使用自定义测试框架 `MNNTestSuite`（`test/MNNTestSuite.h`），类�
 
 ---
 
-## 11. 依赖关系
+## 12. 依赖关系
 
-### 11.1 内部模块依赖（构建顺序）
+### 12.1 内部模块依赖（构建顺序）
 
 ```
 MNNCore (核心)
@@ -504,7 +537,7 @@ MNN_Express (Express API) [可选，MNN_SKIPBUILD_GEOMETRY=OFF 时]
 [可选模块: Train, CV, Audio, LLM, Diffusion, Converter, ...]
 ```
 
-### 11.2 第三方依赖
+### 12.2 第三方依赖
 
 | 依赖 | 路径 | 用途 |
 |------|------|------|
@@ -514,14 +547,15 @@ MNN_Express (Express API) [可选，MNN_SKIPBUILD_GEOMETRY=OFF 时]
 | imageHelper | `3rd_party/imageHelper/` | 图像加载辅助 |
 | OpenCLHeaders | `3rd_party/OpenCLHeaders/` | OpenCL 头文件 |
 
-### 11.3 LLM 导出依赖（Python）
+### 12.3 LLM 导出依赖（Python）
 
 见 `transformers/llm/export/requirements.txt`
 
 ---
 
-## 12. 更新日志
+## 13. 更新日志
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
 | 2026-04-05 | 初始版本 | 基于 MNN v3.4.1 源码创建初始代码文档 |
+| 2026-04-05 | CI 更新 | 新增 `android-apk.yml` 工作流及第 9 章 CI/CD 文档 |
