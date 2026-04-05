@@ -47,12 +47,12 @@ jobs:
 
     # -----------------------------------------------------------------------
     # 环境变量集中管理：
-    #   ANDROID_HOME: Android SDK 安装路径，使用 runner 的 tool_cache 目录
+    #   ANDROID_HOME: Android SDK 安装路径（runner 用户 home 目录下，确保可写）
     #   ANDROID_NDK:  NDK 路径，build_64.sh 脚本会通过这个变量找到 NDK 工具链
     #   NDK_VERSION:  固定 NDK 版本，必须与 app/build.gradle 中的 ndkVersion 一致
     # -----------------------------------------------------------------------
     env:
-      ANDROID_HOME: ${{ runner.tool_cache }}/android-sdk
+      ANDROID_HOME: /home/runner/android-sdk
       NDK_VERSION: "27.2.12479018"
 
     steps:
