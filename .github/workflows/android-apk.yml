@@ -47,12 +47,11 @@ jobs:
 
     # -----------------------------------------------------------------------
     # 环境变量集中管理：
-    #   ANDROID_HOME: Android SDK 安装路径（runner 用户 home 目录下，确保可写）
-    #   ANDROID_NDK:  NDK 路径，build_64.sh 脚本会通过这个变量找到 NDK 工具链
-    #   NDK_VERSION:  固定 NDK 版本，必须与 app/build.gradle 中的 ndkVersion 一致
+    #   NDK_VERSION: 固定 NDK 版本，必须与 app/build.gradle 中的 ndkVersion 一致
+    #   注意：ANDROID_HOME 使用 runner 预装的值（/usr/local/lib/android/sdk），
+    #         不要自定义，否则会与 ANDROID_SDK_ROOT 冲突导致 Gradle 报错。
     # -----------------------------------------------------------------------
     env:
-      ANDROID_HOME: /home/runner/android-sdk
       NDK_VERSION: "27.2.12479018"
 
     steps:
@@ -74,38 +73,19 @@ jobs:
           java-version: '17'
 
       # =====================================================================
-      # 步骤 3: 安装 Android SDK 和 NDK
-      # 为什么不用 runner 自带的 SDK？
-      #   因为 GitHub Actions runner 自带的 SDK 版本不一定包含我们需要的
-      #   精确 NDK 版本（27.2.12479018），手动安装可以完全控制依赖版本。
-      #
-      # 安装顺序：
-      #   1. 下载 Android command-line tools（包含 sdkmanager）
-      #   2. 用 sdkmanager 安装 NDK、CMake、Platform、Build-tools
-      #   3. 设置 ANDROID_NDK 环境变量供后续步骤使用
+      # 步骤 3: 安装 NDK
+      # 为什么复用 runner 预装的 SDK？
+      #   GitHub Actions ubuntu-latest 已预装 Android SDK（含 sdkmanager、
+      #   platforms、build-tools 等），自定义 ANDROID_HOME 会与 runner 预设的
+      #   ANDROID_SDK_ROOT 冲突导致 Gradle 报错。因此只安装缺少的 NDK 即可。
       # =====================================================================
-      - name: Setup Android SDK & NDK
+      - name: Setup Android NDK
         run: |
-          # 创建 SDK 目录结构（cmdline-tools 必须放在 latest 子目录下）
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-
-          # 下载 Android command-line tools（Linux 版本）
-          curl -fsSL -o cmdline-tools.zip \
-            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
-          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
-
-          # 用 sdkmanager 安装所需组件：
-          #   - ndk: C++ 原生编译工具链
-          #   - cmake: CMake 构建系统（NDK 编译需要）
-          #   - platforms: Android API level（编译目标）
-          #   - build-tools: APK 打包工具（aapt2, dx 等）
+          # 接受 SDK 许可协议（安装新组件前必须）
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "ndk;${NDK_VERSION}" \
-            "cmake;3.22.1" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+
+          # 只安装缺少的 NDK（其他组件 runner 已预装）
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${NDK_VERSION}"
 
           # 将 NDK 路径写入 GITHUB_ENV，后续所有步骤都能通过 $ANDROID_NDK 访问
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
@@ -179,6 +159,9 @@ jobs:
       # =====================================================================
       - name: Build APK (standardDebug)
         run: |
+          # ANDROID_SDK_ROOT 已被 Google 废弃，Gradle 优先使用 ANDROID_HOME。
+          # runner 同时设置了两者且指向不同路径，unset 消除冲突。
+          unset ANDROID_SDK_ROOT
           cd apps/Android/MnnLlmChat
           chmod +x gradlew
           ./gradlew assembleStandardDebug --no-daemon

@@ -481,15 +481,16 @@ MNN 使用自定义测试框架 `MNNTestSuite`（`test/MNNTestSuite.h`），类�
 **触发条件**: 所有分支 push、PR 到 master、手动触发
 
 **构建流程**:
-1. 安装 JDK 17 + Android SDK + NDK 27.2.12479018
+1. 安装 JDK 17，复用 runner 预装的 Android SDK，仅额外安装 NDK 27.2.12479018
 2. CMake 编译 MNN 原生库（arm64-v8a），参数复刻自 `apps/Android/MnnLlmChat/build.sh`
-3. Gradle 构建 `assembleStandardDebug`
+3. Gradle 构建 `assembleStandardDebug`（构建前 unset `ANDROID_SDK_ROOT` 以避免与 `ANDROID_HOME` 冲突）
 4. 上传 APK 为 GitHub Actions Artifact
 
 **关键依赖**:
 - `project/android/build_64.sh`: NDK 编译脚本，依赖 `$ANDROID_NDK` 环境变量
 - `apps/Android/MnnLlmChat/`: Gradle 项目，依赖 `project/android/build_64/lib/` 下的 `.so` 文件
 - NDK 版本必须精确匹配 `27.2.12479018`（`app/build.gradle` 硬编码）
+- `ANDROID_HOME` 使用 runner 预装值，不自定义（否则与 `ANDROID_SDK_ROOT` 冲突）
 
 ---
 
@@ -559,3 +560,4 @@ MNN_Express (Express API) [可选，MNN_SKIPBUILD_GEOMETRY=OFF 时]
 |------|------|------|
 | 2026-04-05 | 初始版本 | 基于 MNN v3.4.1 源码创建初始代码文档 |
 | 2026-04-05 | CI 更新 | 新增 `android-apk.yml` 工作流及第 9 章 CI/CD 文档 |
+| 2026-04-05 | CI 修复 | 修复 `android-apk.yml` SDK 路径冲突：复用 runner 预装 SDK，不再自建 SDK 目录 |
