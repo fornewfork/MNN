@@ -71,11 +71,18 @@ include_directories("${CMAKE_SOURCE_DIR}/third_party")
 add_library(MNN SHARED IMPORTED)
 set_target_properties(MNN PROPERTIES IMPORTED_LOCATION "${LIB_PATH}/libMNN.so")
 
-add_library(llm SHARED IMPORTED)
-set_target_properties(llm PROPERTIES IMPORTED_LOCATION "${LIB_PATH}/libllm.so")
-
-add_library(mnn_Express SHARED IMPORTED)
-set_target_properties(mnn_Express PROPERTIES IMPORTED_LOCATION "${LIB_PATH}/libMNN_Express.so")
+# MNN_SEP_BUILD=ON 时 llm/Express 是独立 .so，OFF 时合入 libMNN.so
+set(EXTRA_MNN_LIBS "")
+if(EXISTS "${LIB_PATH}/libllm.so")
+    add_library(llm SHARED IMPORTED)
+    set_target_properties(llm PROPERTIES IMPORTED_LOCATION "${LIB_PATH}/libllm.so")
+    list(APPEND EXTRA_MNN_LIBS llm)
+endif()
+if(EXISTS "${LIB_PATH}/libMNN_Express.so")
+    add_library(mnn_Express SHARED IMPORTED)
+    set_target_properties(mnn_Express PROPERTIES IMPORTED_LOCATION "${LIB_PATH}/libMNN_Express.so")
+    list(APPEND EXTRA_MNN_LIBS mnn_Express)
+endif()
 
 
 # Link your native library with the `.so` file
@@ -84,13 +91,10 @@ set_target_properties(mnn_Express PROPERTIES IMPORTED_LOCATION "${LIB_PATH}/libM
 # can link libraries from various origins, such as libraries defined in this
 # build script, prebuilt third-party libraries, or Android system libraries.
 target_link_libraries(${CMAKE_PROJECT_NAME}
-        # List libraries link to the target library
         android
         log
         MNN
-        llm
-        mnn_Express
+        ${EXTRA_MNN_LIBS}
         # MediaCodec libraries for hardware video decoding
         mediandk
-
         )
