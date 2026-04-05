@@ -492,6 +492,10 @@ MNN 使用自定义测试框架 `MNNTestSuite`（`test/MNNTestSuite.h`），类�
 - NDK 版本必须精确匹配 `27.2.12479018`（`app/build.gradle` 硬编码）
 - `ANDROID_HOME` 使用 runner 预装值，不自定义（否则与 `ANDROID_SDK_ROOT` 冲突）
 
+**注意事项**:
+- CI 使用 `MNN_SEP_BUILD=OFF`（单库模式），`libllm.so` 和 `libMNN_Express.so` 合入 `libMNN.so`，不产生独立文件
+- App 的 `app/src/main/cpp/CMakeLists.txt` 使用 `EXISTS` 条件检查来兼容 `MNN_SEP_BUILD=ON/OFF` 两种模式
+
 ---
 
 ## 10. Skills（AI 辅助开发指引）
@@ -561,3 +565,4 @@ MNN_Express (Express API) [可选，MNN_SKIPBUILD_GEOMETRY=OFF 时]
 | 2026-04-05 | 初始版本 | 基于 MNN v3.4.1 源码创建初始代码文档 |
 | 2026-04-05 | CI 更新 | 新增 `android-apk.yml` 工作流及第 9 章 CI/CD 文档 |
 | 2026-04-05 | CI 修复 | 修复 `android-apk.yml` SDK 路径冲突：复用 runner 预装 SDK，不再自建 SDK 目录 |
+| 2026-04-05 | 构建修复 | `app/src/main/cpp/CMakeLists.txt` 改用 `EXISTS` 条件引用 `libllm.so`/`libMNN_Express.so`，兼容 `MNN_SEP_BUILD=OFF` 单库模式 |
